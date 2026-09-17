@@ -1,0 +1,99 @@
+<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>THE BEAUTY ROOM BY K – Termin buchen</title><style>
+:root{--bg:#f5eadc;--card:#fffaf3;--ink:#2e2119;--muted:#806f61;--accent:#8a674b;--line:#e4d4c4}*{box-sizing:border-box}body{margin:0;font-family:Inter,Arial,sans-serif;background:linear-gradient(135deg,#f2e2cf,#fffaf3);color:var(--ink)}.wrap{max-width:520px;margin:auto;min-height:100vh;padding:24px 18px 50px}.brand{text-align:center;padding:20px 0}.brand h1{font-family:Georgia,serif;letter-spacing:3px;font-weight:500;margin:0;font-size:28px}.brand em{font-family:Georgia,serif;font-size:25px}.sub{color:var(--muted);margin-top:8px}.card{background:rgba(255,250,243,.94);border:1px solid var(--line);border-radius:22px;padding:18px;margin:12px 0;box-shadow:0 12px 35px #76533218}.progress{display:flex;gap:7px;margin:10px 0 20px}.dot{height:5px;flex:1;border-radius:9px;background:#e2d3c4}.dot.on{background:var(--accent)}h2{font-family:Georgia,serif;font-size:25px;margin:8px 0 14px}.option{width:100%;text-align:left;border:1px solid var(--line);background:#fff;border-radius:16px;padding:15px;margin:7px 0;color:var(--ink);font-size:15px;display:flex;justify-content:space-between;gap:10px}.option small{color:var(--muted)}button{cursor:pointer}.primary{width:100%;border:0;background:var(--accent);color:white;border-radius:15px;padding:15px;font-size:16px;margin-top:12px}.primary:disabled{opacity:.45}.back{border:0;background:none;color:var(--muted);font-size:14px;padding:10px 0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.time{border:1px solid var(--line);background:#fff;padding:12px 5px;border-radius:12px}.time.sel{background:var(--accent);color:#fff}.field{margin:12px 0}.field label{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}.field input{width:100%;border:1px solid var(--line);border-radius:13px;padding:14px;background:#fff;font-size:16px;color:var(--ink)}.field input[type=date]::-webkit-datetime-edit,.field input[type=date]::-webkit-datetime-edit-fields-wrapper,.field input[type=date]::-webkit-datetime-edit-text,.field input[type=date]::-webkit-datetime-edit-month-field,.field input[type=date]::-webkit-datetime-edit-day-field,.field input[type=date]::-webkit-datetime-edit-year-field{color:var(--ink);opacity:1}.summary{line-height:1.8}.ok{text-align:center;padding:24px 4px}.check{width:64px;height:64px;border-radius:50%;background:#ead9c6;margin:auto;display:grid;place-items:center;font-size:34px;color:var(--accent)}.note{font-size:12px;color:var(--muted);margin-top:18px}.price{white-space:nowrap;font-weight:600}.loading{text-align:center;padding:40px 10px;color:var(--muted)}
+</style></head><body><main class='wrap'><div class='brand'><h1>THE BEAUTY ROOM</h1><em>by K</em><div class='sub'>Lashes • Brows • Nails</div></div><div class='progress' id='prog'></div><section class='card' id='app'></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
+const supa=supabase.createClient('https://gjnlctvhpneforvccqnx.supabase.co','sb_publishable_-RyuhfWXQvQ7jC8e0WswMg_qZw_CIau');
+const FRIEND_PHONE='+41798884705';
+let services=[],blockedRanges=[],dataLoaded=false;
+
+function pad(n){return String(n).padStart(2,'0')}
+function todayStr(){let d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function minBookableStr(){let d=new Date();d.setDate(d.getDate()+1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function isDateBlocked(dateStr){return blockedRanges.some(r=>dateStr>=r.start_date&&dateStr<=r.end_date)}
+
+let state={step:1,cat:null,s:null,addon:false,date:minBookableStr(),time:'',first:'',last:'',phone:''};
+const app=document.querySelector('#app'),prog=document.querySelector('#prog');
+
+async function loadData(){
+  const [{data:svc},{data:blk}]=await Promise.all([
+    supa.from('services').select('*').eq('active',true).order('category').order('sort_order'),
+    supa.from('blocked_times').select('start_date,end_date')
+  ]);
+  services=svc||[];blockedRanges=blk||[];dataLoaded=true;render()
+}
+
+function progress(){prog.innerHTML=[1,2,3,4,5].map(x=>`<i class='dot ${x<=state.step?'on':''}'></i>`).join('')}
+function back(){state.step=Math.max(1,state.step-1);render()}
+function btnBack(){return state.step>1?`<button class='back' onclick='back()'>← Zurück</button>`:''}
+function categories(){return[...new Set(services.map(s=>s.category))]}
+function currentService(){return services[state.s]}
+
+function render(){
+  progress();
+  if(!dataLoaded){app.innerHTML=`<div class='loading'>Lädt...</div>`;return}
+  if(state.step===1){
+    const cats=categories();
+    app.innerHTML=`<h2>Was darf es sein?</h2>${cats.map(c=>{const n=services.filter(s=>s.category===c).length;return `<button class='option' onclick="state.cat='${c}';state.step=2;render()"><span><b>${c}</b><br><small>${n} Behandlung${n>1?'en':''}</small></span><span>›</span></button>`}).join('')}`
+  }
+  else if(state.step===2){
+    app.innerHTML=`${btnBack()}<h2>${state.cat}</h2>${services.map((s,i)=>s.category===state.cat?`<button class='option' onclick='state.s=${i};state.step=${s.addon_name?3:4};render()'><span><b>${s.name}</b><br><small>${s.duration_minutes} Min.</small></span><span class='price'>CHF ${s.price_chf}</span></button>`:'').join('')}`
+  }
+  else if(state.step===3){
+    const s=currentService();
+    app.innerHTML=`${btnBack()}<h2>Zusatzoption</h2><div class='option'><span><b>${s.name}</b><br><small>${s.duration_minutes} Min.</small></span><span class='price'>CHF ${s.price_chf}</span></div><button class='option' onclick='state.addon=!state.addon;render()'><span>${state.addon?'☑':'☐'} <b>${s.addon_name}</b><br><small>+ ${s.addon_duration_minutes} Min.</small></span><span class='price'>+ CHF ${s.addon_price_chf}</span></button><button class='primary' onclick='state.step=4;render()'>Weiter →</button>`
+  }
+  else if(state.step===4){
+    const min=minBookableStr();
+    app.innerHTML=`${btnBack()}<h2>Datum & Uhrzeit</h2><div class='field'><label>Datum</label><input type='date' min='${min}' value='${state.date}' onchange="let v=this.value<minBookableStr()?minBookableStr():this.value;this.value=v;state.date=v;state.time='';render()"></div>${state.date?(isDateBlocked(state.date)?`<div class='note'>An diesem Tag ist das Studio leider geschlossen. Bitte wähle ein anderes Datum.</div>`:`<div class='grid'>${times().map(t=>`<button class='time ${state.time===t?'sel':''}' onclick="state.time='${t}';render()">${t}</button>`).join('')}</div>`):''}<button class='primary' ${!state.date||!state.time?'disabled':''} onclick='state.step=5;render()'>Weiter →</button><div class='note'>Mo–Fr 09:00–20:00 · Sa 09:00–15:00 · So geschlossen · Buchung mind. 24h im Voraus</div>`
+  }
+  else if(state.step===5){
+    const s=currentService(),dur=s.duration_minutes+(state.addon?s.addon_duration_minutes||0:0),price=Number(s.price_chf)+(state.addon?Number(s.addon_price_chf)||0:0);
+    app.innerHTML=`${btnBack()}<h2>Deine Daten</h2><div class='summary'><b>${s.name}${state.addon?' + '+s.addon_name:''}</b><br>${state.date} · ${state.time}<br>${dur} Min. · CHF ${price}</div><div class='field'><label>Vorname *</label><input id='first' value='${state.first}'></div><div class='field'><label>Nachname *</label><input id='last' value='${state.last}'></div><div class='field'><label>Handynummer *</label><input id='phone' type='tel' placeholder='+41 79 123 45 67' value='${state.phone}'></div><button class='primary' id='bookBtn' onclick='book()'>Termin jetzt buchen →</button><div class='note'>Mit der Buchung werden die eingegebenen Daten zur Terminverwaltung verwendet.</div>`
+  }
+  else{
+    const s=currentService(),dur=s.duration_minutes+(state.addon?s.addon_duration_minutes||0:0);
+    app.innerHTML=`<div class='ok'><div class='check'>✓</div><h2>Termin bestätigt!</h2><p>Vielen Dank, ${state.first}.</p><div class='summary'><b>${s.name}${state.addon?' + '+s.addon_name:''}</b><br>${state.date} · ${state.time}<br>${dur} Min.<br>THE BEAUTY ROOM BY K · Rorschach</div><p>Du erhältst eine Bestätigungs-SMS.</p></div>`
+  }
+}
+
+function times(){
+  if(isDateBlocked(state.date))return[];
+  let d=new Date(state.date+'T12:00:00');
+  if(d.getDay()===0)return[];
+  let end=d.getDay()===6?15*60:20*60;
+  const s=currentService(),dur=s.duration_minutes+(state.addon?s.addon_duration_minutes||0:0);
+  let a=[];
+  for(let m=9*60;m+dur<=end;m+=30){a.push(pad(Math.floor(m/60))+':'+pad(m%60))}
+  return a
+}
+
+async function sendSms(to,message){
+  try{
+    let res=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to,message})});
+    if(!res.ok){let errBody=await res.json().catch(()=>null);console.error('SMS-Versand fehlgeschlagen an',to,res.status,errBody)}
+  }catch(err){console.error('SMS-Versand fehlgeschlagen an',to,err)}
+}
+
+async function book(){
+  state.first=document.querySelector('#first').value.trim();
+  state.last=document.querySelector('#last').value.trim();
+  state.phone=document.querySelector('#phone').value.trim();
+  if(!state.first||!state.last||!state.phone)return alert('Bitte Vorname, Nachname und Handynummer ausfüllen.');
+  if(!/^\+[1-9]\d{6,14}$/.test(state.phone))return alert('Bitte Handynummer im Format +41791234567 eingeben.');
+  const s=currentService(),dur=s.duration_minutes+(state.addon?s.addon_duration_minutes||0:0),price=Number(s.price_chf)+(state.addon?Number(s.addon_price_chf)||0:0);
+  let btn=document.querySelector('#bookBtn');btn.disabled=true;btn.textContent='Wird gebucht...';
+  try{
+    let{data:cust,error:e1}=await supa.from('customers').insert({first_name:state.first,last_name:state.last,phone:state.phone}).select().single();
+    if(e1)throw e1;
+    let startAt=new Date(state.date+'T'+state.time+':00');
+    let endAt=new Date(startAt.getTime()+dur*60000);
+    let{error:e3}=await supa.from('bookings').insert({customer_id:cust.id,service_id:s.id,start_at:startAt.toISOString(),end_at:endAt.toISOString(),total_price_chf:price,status:'confirmed',source:'online',customer_note:state.addon?'Mit Zusatz: '+s.addon_name:null});
+    if(e3)throw e3
+  }catch(err){console.error(err);btn.disabled=false;btn.textContent='Termin jetzt buchen →';return alert('Es gab ein Problem beim Speichern. Bitte versuch es nochmal.')}
+  const kundeMsg=`Hallo ${state.first}, dein Termin am ${state.date} um ${state.time} bei THE BEAUTY ROOM BY K ist bestätigt.`;
+  const freundinMsg=`Neue Buchung: ${state.first} ${state.last} am ${state.date} um ${state.time} (${s.name}${state.addon?' + '+s.addon_name:''}).`;
+  await Promise.allSettled([sendSms(state.phone,kundeMsg),sendSms(FRIEND_PHONE,freundinMsg)]);
+  state.step=6;render()
+}
+
+loadData();
+</script></body></html>
