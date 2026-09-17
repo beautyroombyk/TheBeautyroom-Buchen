@@ -1,0 +1,193 @@
+<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>THE BEAUTY ROOM BY K – Verwaltung</title><style>
+:root{--bg:#f5eadc;--card:#fffaf3;--ink:#2e2119;--muted:#806f61;--accent:#8a674b;--line:#e4d4c4}*{box-sizing:border-box}body{margin:0;font-family:Inter,Arial,sans-serif;background:linear-gradient(135deg,#f2e2cf,#fffaf3);color:var(--ink)}.wrap{max-width:560px;margin:auto;min-height:100vh;padding:24px 18px 50px}.brand{text-align:center;padding:20px 0}.brand h1{font-family:Georgia,serif;letter-spacing:3px;font-weight:500;margin:0;font-size:26px}.brand em{font-family:Georgia,serif;font-size:22px}.sub{color:var(--muted);margin-top:8px;font-size:14px}.card{background:rgba(255,250,243,.94);border:1px solid var(--line);border-radius:22px;padding:18px;margin:12px 0;box-shadow:0 12px 35px #76533218}h2{font-family:Georgia,serif;font-size:22px;margin:0 0 14px}h3{font-family:Georgia,serif;font-size:17px;margin:0 0 10px}.field{margin:12px 0}.field label{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}.field input,.field textarea,.field select{width:100%;border:1px solid var(--line);border-radius:13px;padding:14px;background:#fff;font-size:16px;color:var(--ink);font-family:inherit}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.primary{width:100%;border:0;background:var(--accent);color:white;border-radius:15px;padding:15px;font-size:16px;cursor:pointer}.primary:disabled{opacity:.45}.tabs{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}.tab{flex:1;min-width:90px;text-align:center;padding:12px 8px;border-radius:13px;border:1px solid var(--line);background:#fff;color:var(--muted);font-size:13px;cursor:pointer}.tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}.booking{border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;background:#fff}.booking .top{display:flex;justify-content:space-between;align-items:start;gap:10px}.booking b{font-size:15px}.booking small{color:var(--muted);display:block;margin-top:2px}.status{font-size:11px;padding:3px 9px;border-radius:20px;background:#ead9c6;color:var(--accent);white-space:nowrap}.status.cancelled{background:#f2d5d5;color:#a44}.cancel-btn{border:0;background:none;color:#a44;font-size:13px;margin-top:10px;padding:6px 0;cursor:pointer}.note{font-size:12px;color:var(--muted);margin-top:6px}.empty{text-align:center;color:var(--muted);padding:30px 10px;font-size:14px}.blocked-item,.service-item{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:13px;padding:12px 14px;margin:8px 0;background:#fff;gap:10px}.blocked-item div,.service-item div{font-size:14px}.blocked-item small,.service-item small{color:var(--muted);display:block}.del-btn{border:0;background:none;color:#a44;font-size:13px;cursor:pointer;white-space:nowrap}.divider{border:0;border-top:1px solid var(--line);margin:20px 0}.checkbox-row{display:flex;align-items:center;gap:10px;margin:14px 0}.checkbox-row input{width:auto}
+</style></head><body><main class='wrap'><div class='brand'><h1>THE BEAUTY ROOM</h1><em>by K</em><div class='sub'>Verwaltung</div></div><section id='app'></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
+const supa=supabase.createClient('https://gjnlctvhpneforvccqnx.supabase.co','sb_publishable_-RyuhfWXQvQ7jC8e0WswMg_qZw_CIau');
+const ADMIN_PASSWORD='FatihKim0903';
+const app=document.querySelector('#app');
+let tab='bookings',bookings=[],blocked=[],services=[],newAddon=false;
+
+function isLoggedIn(){return sessionStorage.getItem('beautyroom_admin')==='1'}
+function login(){
+  const pw=document.querySelector('#pw').value;
+  if(pw===ADMIN_PASSWORD){sessionStorage.setItem('beautyroom_admin','1');render()}
+  else alert('Falsches Passwort.')
+}
+function logout(){sessionStorage.removeItem('beautyroom_admin');render()}
+
+function fmtDate(iso){const d=new Date(iso);return d.toLocaleDateString('de-CH',{weekday:'short',day:'2-digit',month:'2-digit',year:'numeric'})}
+function fmtTime(iso){const d=new Date(iso);return d.toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'})}
+
+async function loadBookings(){
+  const {data,error}=await supa.from('bookings').select('id,start_at,end_at,total_price_chf,status,customer_note,customers(first_name,last_name,phone),services(name)').order('start_at',{ascending:true});
+  if(error){console.error(error);bookings=[];return}
+  bookings=data||[]
+}
+async function loadBlocked(){
+  const {data,error}=await supa.from('blocked_times').select('*').order('start_date',{ascending:true});
+  if(error){console.error(error);blocked=[];return}
+  blocked=data||[]
+}
+async function loadServices(){
+  const {data,error}=await supa.from('services').select('*').order('category').order('sort_order');
+  if(error){console.error(error);services=[];return}
+  services=data||[]
+}
+
+async function cancelBooking(id){
+  if(!confirm('Diesen Termin wirklich stornieren?'))return;
+  const {error}=await supa.from('bookings').update({status:'cancelled'}).eq('id',id);
+  if(error){alert('Fehler beim Stornieren.');console.error(error);return}
+  await loadBookings();renderApp()
+}
+
+async function addBlocked(){
+  const start=document.querySelector('#b_start').value;
+  const end=document.querySelector('#b_end').value;
+  const reason=document.querySelector('#b_reason').value.trim();
+  if(!start||!end)return alert('Bitte Start- und Enddatum wählen.');
+  if(end<start)return alert('Enddatum darf nicht vor dem Startdatum liegen.');
+  const {error}=await supa.from('blocked_times').insert({start_date:start,end_date:end,reason:reason||null});
+  if(error){alert('Fehler beim Speichern.');console.error(error);return}
+  await loadBlocked();renderApp()
+}
+async function deleteBlocked(id){
+  if(!confirm('Diese Sperre wirklich entfernen?'))return;
+  const {error}=await supa.from('blocked_times').delete().eq('id',id);
+  if(error){alert('Fehler beim Löschen.');console.error(error);return}
+  await loadBlocked();renderApp()
+}
+
+function toggleNewAddon(){newAddon=!newAddon;renderApp()}
+async function addService(){
+  const category=document.querySelector('#s_category').value.trim();
+  const name=document.querySelector('#s_name').value.trim();
+  const duration=parseInt(document.querySelector('#s_duration').value);
+  const price=parseFloat(document.querySelector('#s_price').value);
+  if(!category||!name||!duration||isNaN(price))return alert('Bitte Kategorie, Name, Dauer und Preis ausfüllen.');
+  const payload={category,name,duration_minutes:duration,price_chf:price,active:true,sort_order:services.length};
+  if(newAddon){
+    const addonName=document.querySelector('#s_addon_name').value.trim();
+    const addonDuration=parseInt(document.querySelector('#s_addon_duration').value);
+    const addonPrice=parseFloat(document.querySelector('#s_addon_price').value);
+    if(!addonName||!addonDuration||isNaN(addonPrice))return alert('Bitte alle Zusatzoption-Felder ausfüllen, oder Zusatzoption abwählen.');
+    payload.addon_name=addonName;payload.addon_duration_minutes=addonDuration;payload.addon_price_chf=addonPrice
+  }
+  const {error}=await supa.from('services').insert(payload);
+  if(error){alert('Fehler beim Speichern.');console.error(error);return}
+  newAddon=false;
+  await loadServices();renderApp()
+}
+async function toggleServiceActive(id,active){
+  const {error}=await supa.from('services').update({active:!active}).eq('id',id);
+  if(error){alert('Fehler.');console.error(error);return}
+  await loadServices();renderApp()
+}
+async function deleteService(id){
+  if(!confirm('Diese Behandlung wirklich löschen?'))return;
+  const {error}=await supa.from('services').delete().eq('id',id);
+  if(error){alert('Löschen fehlgeschlagen (evtl. gibt es noch Buchungen dazu). Du kannst die Behandlung stattdessen deaktivieren.');console.error(error);return}
+  await loadServices();renderApp()
+}
+
+function bookingsHtml(){
+  const now=new Date();
+  const upcoming=bookings.filter(b=>new Date(b.end_at)>=now&&b.status!=='cancelled');
+  const past=bookings.filter(b=>new Date(b.end_at)<now||b.status==='cancelled');
+  function card(b){
+    const cust=b.customers?`${b.customers.first_name} ${b.customers.last_name}`:'—';
+    const phone=b.customers?.phone||'';
+    const svc=b.services?.name||'—';
+    const cancelled=b.status==='cancelled';
+    return `<div class='booking'>
+      <div class='top'>
+        <div><b>${cust}</b><small>${svc}</small><small>${fmtDate(b.start_at)} · ${fmtTime(b.start_at)}–${fmtTime(b.end_at)}</small><small>${phone}</small>${b.customer_note?`<small>${b.customer_note}</small>`:''}</div>
+        <span class='status ${cancelled?'cancelled':''}'>${cancelled?'storniert':'CHF '+b.total_price_chf}</span>
+      </div>
+      ${!cancelled?`<button class='cancel-btn' onclick='cancelBooking("${b.id}")'>Termin stornieren</button>`:''}
+    </div>`
+  }
+  return `
+    <h2>Kommende Termine</h2>
+    ${upcoming.length?upcoming.map(card).join(''):`<div class='empty'>Keine kommenden Termine.</div>`}
+    ${past.length?`<h2 style='margin-top:22px'>Vergangen / Storniert</h2>${past.slice(0,15).map(card).join('')}`:''}
+  `
+}
+
+function blockedHtml(){
+  return `
+    <h2>Tage sperren (z.B. Ferien)</h2>
+    <div class='field'><label>Von</label><input type='date' id='b_start'></div>
+    <div class='field'><label>Bis</label><input type='date' id='b_end'></div>
+    <div class='field'><label>Grund (optional)</label><input type='text' id='b_reason' placeholder='z.B. Ferien'></div>
+    <button class='primary' onclick='addBlocked()'>Sperre hinzufügen</button>
+    <h2 style='margin-top:22px'>Gesperrte Zeiträume</h2>
+    ${blocked.length?blocked.map(b=>`
+      <div class='blocked-item'>
+        <div><b>${b.start_date}</b> – <b>${b.end_date}</b><small>${b.reason||''}</small></div>
+        <button class='del-btn' onclick='deleteBlocked("${b.id}")'>Entfernen</button>
+      </div>
+    `).join(''):`<div class='empty'>Keine gesperrten Zeiträume.</div>`}
+  `
+}
+
+function servicesHtml(){
+  return `
+    <h2>Neue Behandlung hinzufügen</h2>
+    <div class='field'><label>Kategorie (z.B. Brows, Lashes, Nails)</label><input type='text' id='s_category' list='cat_list'><datalist id='cat_list'>${[...new Set(services.map(s=>s.category))].map(c=>`<option value='${c}'>`).join('')}</datalist></div>
+    <div class='field'><label>Name der Behandlung</label><input type='text' id='s_name'></div>
+    <div class='row2'>
+      <div class='field'><label>Dauer (Min.)</label><input type='number' id='s_duration'></div>
+      <div class='field'><label>Preis (CHF)</label><input type='number' step='0.01' id='s_price'></div>
+    </div>
+    <div class='checkbox-row'><input type='checkbox' id='addon_check' onchange='toggleNewAddon()' ${newAddon?'checked':''}><label for='addon_check' style='margin:0'>Optionale Zusatzoption anbieten</label></div>
+    ${newAddon?`
+      <div class='field'><label>Name der Zusatzoption (z.B. Färben)</label><input type='text' id='s_addon_name'></div>
+      <div class='row2'>
+        <div class='field'><label>Zusatz-Dauer (Min.)</label><input type='number' id='s_addon_duration'></div>
+        <div class='field'><label>Zusatz-Preis (CHF)</label><input type='number' step='0.01' id='s_addon_price'></div>
+      </div>
+    `:''}
+    <button class='primary' onclick='addService()'>Behandlung hinzufügen</button>
+    <hr class='divider'>
+    <h2>Bestehende Behandlungen</h2>
+    ${services.length?services.map(s=>`
+      <div class='service-item'>
+        <div><b>${s.name}</b><small>${s.category} · ${s.duration_minutes} Min. · CHF ${s.price_chf}${s.addon_name?` · +${s.addon_name} (${s.addon_duration_minutes} Min., CHF ${s.addon_price_chf})`:''}</small>${!s.active?`<small style='color:#a44'>deaktiviert</small>`:''}</div>
+        <div style='display:flex;flex-direction:column;gap:6px;align-items:end'>
+          <button class='del-btn' onclick='toggleServiceActive("${s.id}",${s.active})'>${s.active?'Deaktivieren':'Aktivieren'}</button>
+          <button class='del-btn' onclick='deleteService("${s.id}")'>Löschen</button>
+        </div>
+      </div>
+    `).join(''):`<div class='empty'>Noch keine Behandlungen.</div>`}
+  `
+}
+
+function renderApp(){
+  app.innerHTML=`
+    <section class='card'>
+      <div class='tabs'>
+        <div class='tab ${tab==='bookings'?'active':''}' onclick='tab="bookings";renderApp()'>Buchungen</div>
+        <div class='tab ${tab==='blocked'?'active':''}' onclick='tab="blocked";renderApp()'>Tage sperren</div>
+        <div class='tab ${tab==='services'?'active':''}' onclick='tab="services";renderApp()'>Angebot</div>
+      </div>
+      ${tab==='bookings'?bookingsHtml():tab==='blocked'?blockedHtml():servicesHtml()}
+      <div class='note' style='text-align:center;margin-top:20px'><a href='#' onclick='logout();return false' style='color:var(--muted)'>Abmelden</a></div>
+    </section>
+  `
+}
+
+async function render(){
+  if(!isLoggedIn()){
+    app.innerHTML=`<section class='card'>
+      <h2>Anmelden</h2>
+      <div class='field'><label>Passwort</label><input type='password' id='pw'></div>
+      <button class='primary' onclick='login()'>Anmelden</button>
+    </section>`;
+    return
+  }
+  app.innerHTML=`<div class='empty'>Lädt...</div>`;
+  await Promise.all([loadBookings(),loadBlocked(),loadServices()]);
+  renderApp()
+}
+render();
+</script></body></html>
