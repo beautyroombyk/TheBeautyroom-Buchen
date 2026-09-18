@@ -15,7 +15,12 @@ let services=[],blockedRanges=[],dataLoaded=false;
 function pad(n){return String(n).padStart(2,'0')}
 function todayStr(){let d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
 function minBookableStr(){let d=new Date();d.setDate(d.getDate()+1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
-function isDateBlocked(dateStr){return blockedRanges.some(r=>dateStr>=r.start_date&&dateStr<=r.end_date)}
+function isDateBlocked(dateStr){return blockedRanges.some(r=>!r.start_time&&dateStr>=r.start_date&&dateStr<=r.end_date)}
+function timeToMin(t){const [h,m]=t.split(':').map(Number);return h*60+m}
+function blockedTimeWindowsForDate(dateStr){
+  return blockedRanges.filter(r=>r.start_time&&dateStr>=r.start_date&&dateStr<=r.end_date).map(r=>[timeToMin(r.start_time),timeToMin(r.end_time)])
+}
+function slotOverlapsBlocked(startMin,endMin,windows){return windows.some(([bs,be])=>startMin<be&&endMin>bs)}
 
 // state.step: 1=Kategorien, 2=Behandlungen wählen (Mehrfachauswahl), 3=Datum&Zeit, 4=Daten, 5=Bestätigt
 // state.cart: [{i: serviceIndex, addon: bool}, ...]
@@ -25,7 +30,7 @@ const app=document.querySelector('#app'),prog=document.querySelector('#prog');
 async function loadData(){
   const [{data:svc},{data:blk}]=await Promise.all([
     supa.from('services').select('*').eq('active',true).order('sort_order'),
-    supa.from('blocked_times').select('start_date,end_date')
+    supa.from('blocked_times').select('start_date,end_date,start_time,end_time')
   ]);
   services=svc||[];blockedRanges=blk||[];dataLoaded=true;render()
 }
@@ -117,8 +122,12 @@ function times(){
   if(d.getDay()===0)return[];
   let end=d.getDay()===6?15*60:20*60;
   const dur=cartDuration();
+  const windows=blockedTimeWindowsForDate(state.date);
   let a=[];
-  for(let m=9*60;m+dur<=end;m+=30){a.push(pad(Math.floor(m/60))+':'+pad(m%60))}
+  for(let m=9*60;m+dur<=end;m+=30){
+    if(slotOverlapsBlocked(m,m+dur,windows))continue;
+    a.push(pad(Math.floor(m/60))+':'+pad(m%60))
+  }
   return a
 }
 
