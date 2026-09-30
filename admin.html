@@ -9,6 +9,7 @@ let tab='bookings',bookings=[],blocked=[],services=[],newAddon=false;
 let calMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 let selectedDate=null;
 let manualCart=[];
+let manualFirst='',manualLast='',manualPhone='',manualDate='',manualTime='';
 
 function isLoggedIn(){return sessionStorage.getItem('beautyroom_admin')==='1'}
 function login(){
@@ -188,6 +189,32 @@ function blockedHtml(){
   `
 }
 
+function setManualFirst(v){manualFirst=v}
+function setManualLast(v){manualLast=v}
+function setManualPhone(v){manualPhone=v}
+function setManualDate(v){manualDate=v;manualTime='';renderApp()}
+function setManualTime(v){manualTime=v}
+function manualPad(n){return String(n).padStart(2,'0')}
+function manualTimes(dateStr){
+  if(!dateStr)return[];
+  const blockedWhole=blocked.some(r=>!r.start_time&&dateStr>=r.start_date&&dateStr<=r.end_date);
+  if(blockedWhole)return[];
+  const d=new Date(dateStr+'T12:00:00');
+  if(d.getDay()===0)return[];
+  const end=d.getDay()===6?15*60:20*60;
+  const dur=manualDuration()||30;
+  const windows=blocked.filter(r=>r.start_time&&dateStr>=r.start_date&&dateStr<=r.end_date).map(r=>{
+    const [sh,sm]=r.start_time.split(':').map(Number);
+    const [eh,em]=r.end_time.split(':').map(Number);
+    return [sh*60+sm,eh*60+em]
+  });
+  let a=[];
+  for(let m=9*60;m+dur<=end;m+=30){
+    if(windows.some(([bs,be])=>m<be&&m+dur>bs))continue;
+    a.push(manualPad(Math.floor(m/60))+':'+manualPad(m%60))
+  }
+  return a
+}
 function manualToggleItem(i){
   const idx=manualCart.findIndex(c=>c.i===i);
   if(idx>=0)manualCart.splice(idx,1);
@@ -202,11 +229,11 @@ function manualPrice(){return manualCart.reduce((sum,c)=>{const s=services[c.i];
 function manualLabel(){return manualCart.map(c=>{const s=services[c.i];return s.name+(c.addon?' + '+s.addon_name:'')}).join(', ')}
 
 async function addManualBooking(){
-  const first=document.querySelector('#m_first').value.trim();
-  const last=document.querySelector('#m_last').value.trim();
-  const phone=document.querySelector('#m_phone').value.trim();
-  const date=document.querySelector('#m_date').value;
-  const time=document.querySelector('#m_time').value;
+  const first=manualFirst.trim();
+  const last=manualLast.trim();
+  const phone=manualPhone.trim();
+  const date=manualDate;
+  const time=manualTime;
   if(!first||!last)return alert('Bitte Vor- und Nachname eingeben.');
   if(!date||!time)return alert('Bitte Datum und Uhrzeit eingeben.');
   if(!manualCart.length)return alert('Bitte mindestens eine Behandlung auswählen.');
@@ -224,7 +251,7 @@ async function addManualBooking(){
     const {error:e2}=await supa.from('bookings').insert({customer_id:cust.id,service_id:primaryServiceId,start_at:startAt.toISOString(),end_at:endAt.toISOString(),total_price_chf:price,status:'confirmed',source:'manual',customer_note:'Manuell erfasst (z.B. Instagram): '+label});
     if(e2)throw e2;
   }catch(err){console.error(err);alert('Fehler beim Speichern: '+(err.message||''));return}
-  manualCart=[];
+  manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';
   await loadBookings();
   alert('Termin wurde erfasst und ist jetzt im Online-Buchungssystem automatisch gesperrt.');
   tab='bookings';renderApp()
@@ -236,14 +263,11 @@ function manualHtml(){
     <h2>Manuelle Buchung erfassen</h2>
     <div class='note' style='margin:-4px 0 14px'>Für Kundinnen, die z.B. per Instagram-DM buchen. Die Zeit wird danach automatisch im Online-Buchungssystem gesperrt, damit niemand doppelt buchen kann.</div>
     <div class='row2'>
-      <div class='field'><label>Vorname *</label><input type='text' id='m_first'></div>
-      <div class='field'><label>Nachname *</label><input type='text' id='m_last'></div>
+      <div class='field'><label>Vorname *</label><input type='text' id='m_first' value='${manualFirst}' oninput='setManualFirst(this.value)'></div>
+      <div class='field'><label>Nachname *</label><input type='text' id='m_last' value='${manualLast}' oninput='setManualLast(this.value)'></div>
     </div>
-    <div class='field'><label>Handynummer (optional)</label><input type='tel' id='m_phone' placeholder='+41791234567'></div>
-    <div class='row2'>
-      <div class='field'><label>Datum *</label><input type='date' id='m_date'></div>
-      <div class='field'><label>Uhrzeit *</label><input type='time' id='m_time'></div>
-    </div>
+    <div class='field'><label>Handynummer (optional)</label><input type='tel' id='m_phone' value='${manualPhone}' oninput='setManualPhone(this.value)' placeholder='+41791234567'></div>
+    <div class='field'><label>Datum *</label><input type='date' id='m_date' value='${manualDate}' onchange='setManualDate(this.value)'></div>
     <h3>Behandlung(en) auswählen</h3>
     ${cats.map(cat=>`
       <div style='margin:10px 0 4px'><b style='font-size:13px;color:var(--muted)'>${cat}</b></div>
@@ -261,6 +285,13 @@ function manualHtml(){
       }).join('')}
     `).join('')}
     ${manualCart.length?`<div class='note' style='margin:12px 0;font-size:14px'><b>${manualLabel()}</b><br>${manualDuration()} Min. · CHF ${manualPrice()}</div>`:''}
+    <div class='field'><label>Uhrzeit *</label>
+      ${!manualDate?`<div class='note' style='margin-top:0'>Bitte zuerst ein Datum wählen.</div>`:
+        (manualTimes(manualDate).length?`<select id='m_time' onchange='setManualTime(this.value)'>
+          <option value=''>Bitte wählen...</option>
+          ${manualTimes(manualDate).map(t=>`<option value='${t}' ${manualTime===t?'selected':''}>${t}</option>`).join('')}
+        </select>`:`<div class='note' style='margin-top:0'>Keine verfügbaren Zeiten an diesem Tag (gesperrt oder Sonntag).</div>`)}
+    </div>
     <button class='primary' onclick='addManualBooking()'>Termin erfassen & sperren</button>
   `
 }
