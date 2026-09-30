@@ -109,11 +109,10 @@ function render(){
     if(state.date&&!isDateBlocked(state.date)&&!bookingsCache[state.date]){
       loadBookingsForDate(state.date).then(render)
     }
-    const reason=state.date?blockedReasonForDate(state.date):null;
     app.innerHTML=`<button class='back' onclick='state.step=1;render()'>← Zurück zur Auswahl</button><h2>Datum & Uhrzeit</h2>
       <div class='summary' style='margin-bottom:14px'><b>${cartLabel()}</b><br>${dur} Min. · CHF ${cartPrice()}</div>
       <div class='field'><label>Datum</label><input type='date' min='${min}' value='${state.date}' onchange="let v=this.value<minBookableStr()?minBookableStr():this.value;this.value=v;state.date=v;state.time='';render()"></div>
-      ${state.date?(isDateBlocked(state.date)?`<div class='note'>An diesem Tag ist das Studio leider geschlossen${reason?(': '+reason):''}. Bitte wähle ein anderes Datum.</div>`:(bookingsCache[state.date]?`<div class='grid'>${times().map(t=>`<button class='time ${state.time===t?'sel':''}' onclick="state.time='${t}';render()">${t}</button>`).join('')}</div>`:`<div class='loading'>Verfügbare Zeiten werden geladen...</div>`)):''}
+      ${state.date?(isDateBlocked(state.date)?`<div class='note'>Keine verfügbaren Termine an diesem Tag. Bitte wähle ein anderes Datum.</div>`:(bookingsCache[state.date]?`<div class='grid'>${times().map(t=>`<button class='time ${state.time===t?'sel':''}' onclick="state.time='${t}';render()">${t}</button>`).join('')}</div>`:`<div class='loading'>Verfügbare Zeiten werden geladen...</div>`)):''}
       <button class='primary' ${!state.date||!state.time?'disabled':''} onclick='state.step=4;render()'>Weiter →</button>
       <div class='note'>Mo–Fr 09:00–20:00 · Sa 09:00–15:00 · So geschlossen · Buchung mind. 24h im Voraus</div>`
   }
