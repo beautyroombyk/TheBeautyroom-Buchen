@@ -8,6 +8,7 @@ const app=document.querySelector('#app');
 let tab='bookings',bookings=[],blocked=[],services=[],newAddon=false;
 let calMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 let selectedDate=null;
+let manualCart=[];
 
 function isLoggedIn(){return sessionStorage.getItem('beautyroom_admin')==='1'}
 function login(){
@@ -187,6 +188,83 @@ function blockedHtml(){
   `
 }
 
+function manualToggleItem(i){
+  const idx=manualCart.findIndex(c=>c.i===i);
+  if(idx>=0)manualCart.splice(idx,1);
+  else manualCart.push({i,addon:false});
+  renderApp()
+}
+function manualToggleAddon(i){
+  const item=manualCart.find(c=>c.i===i);if(item){item.addon=!item.addon;renderApp()}
+}
+function manualDuration(){return manualCart.reduce((sum,c)=>{const s=services[c.i];return sum+s.duration_minutes+(c.addon?s.addon_duration_minutes||0:0)},0)}
+function manualPrice(){return manualCart.reduce((sum,c)=>{const s=services[c.i];return sum+Number(s.price_chf)+(c.addon?Number(s.addon_price_chf)||0:0)},0)}
+function manualLabel(){return manualCart.map(c=>{const s=services[c.i];return s.name+(c.addon?' + '+s.addon_name:'')}).join(', ')}
+
+async function addManualBooking(){
+  const first=document.querySelector('#m_first').value.trim();
+  const last=document.querySelector('#m_last').value.trim();
+  const phone=document.querySelector('#m_phone').value.trim();
+  const date=document.querySelector('#m_date').value;
+  const time=document.querySelector('#m_time').value;
+  if(!first||!last)return alert('Bitte Vor- und Nachname eingeben.');
+  if(!date||!time)return alert('Bitte Datum und Uhrzeit eingeben.');
+  if(!manualCart.length)return alert('Bitte mindestens eine Behandlung auswählen.');
+  const dur=manualDuration(),price=manualPrice(),label=manualLabel();
+  const primaryServiceId=services[manualCart[0].i].id;
+  const startAt=new Date(date+'T'+time+':00');
+  const endAt=new Date(startAt.getTime()+dur*60000);
+  try{
+    const {data:existing,error:eCheck}=await supa.from('bookings').select('id,start_at,end_at').neq('status','cancelled').gte('start_at',date+'T00:00:00').lte('start_at',date+'T23:59:59');
+    if(eCheck)throw eCheck;
+    const overlap=(existing||[]).some(b=>{const bs=new Date(b.start_at),be=new Date(b.end_at);return startAt<be&&endAt>bs});
+    if(overlap&&!confirm('Achtung: In diesem Zeitraum existiert bereits ein Termin. Trotzdem speichern?'))return;
+    const {data:cust,error:e1}=await supa.from('customers').insert({first_name:first,last_name:last,phone:phone||null}).select().single();
+    if(e1)throw e1;
+    const {error:e2}=await supa.from('bookings').insert({customer_id:cust.id,service_id:primaryServiceId,start_at:startAt.toISOString(),end_at:endAt.toISOString(),total_price_chf:price,status:'confirmed',source:'manual',customer_note:'Manuell erfasst (z.B. Instagram): '+label});
+    if(e2)throw e2;
+  }catch(err){console.error(err);alert('Fehler beim Speichern: '+(err.message||''));return}
+  manualCart=[];
+  await loadBookings();
+  alert('Termin wurde erfasst und ist jetzt im Online-Buchungssystem automatisch gesperrt.');
+  tab='bookings';renderApp()
+}
+
+function manualHtml(){
+  const cats=[...new Set(services.map(s=>s.category))];
+  return `
+    <h2>Manuelle Buchung erfassen</h2>
+    <div class='note' style='margin:-4px 0 14px'>Für Kundinnen, die z.B. per Instagram-DM buchen. Die Zeit wird danach automatisch im Online-Buchungssystem gesperrt, damit niemand doppelt buchen kann.</div>
+    <div class='row2'>
+      <div class='field'><label>Vorname *</label><input type='text' id='m_first'></div>
+      <div class='field'><label>Nachname *</label><input type='text' id='m_last'></div>
+    </div>
+    <div class='field'><label>Handynummer (optional)</label><input type='tel' id='m_phone' placeholder='+41791234567'></div>
+    <div class='row2'>
+      <div class='field'><label>Datum *</label><input type='date' id='m_date'></div>
+      <div class='field'><label>Uhrzeit *</label><input type='time' id='m_time'></div>
+    </div>
+    <h3>Behandlung(en) auswählen</h3>
+    ${cats.map(cat=>`
+      <div style='margin:10px 0 4px'><b style='font-size:13px;color:var(--muted)'>${cat}</b></div>
+      ${services.filter(s=>s.category===cat).map(s=>{
+        const i=services.indexOf(s);
+        const item=manualCart.find(c=>c.i===i);
+        const row=`<div class='service-item' style='cursor:pointer' onclick='manualToggleItem(${i})'>
+          <div><b>${item?'✓ ':''}${s.name}</b><small>${s.duration_minutes} Min. · CHF ${s.price_chf}</small></div>
+        </div>`;
+        const addonRow=(item&&s.addon_name)?`<div class='service-item' style='margin:0 0 8px 20px;cursor:pointer;background:#fbf5ec' onclick='manualToggleAddon(${i})'>
+          <div><small>${item.addon?'✓ ':''}+ ${s.addon_name} (${s.addon_duration_minutes} Min.)</small></div>
+          <div><small>+CHF ${s.addon_price_chf}</small></div>
+        </div>`:'';
+        return row+addonRow
+      }).join('')}
+    `).join('')}
+    ${manualCart.length?`<div class='note' style='margin:12px 0;font-size:14px'><b>${manualLabel()}</b><br>${manualDuration()} Min. · CHF ${manualPrice()}</div>`:''}
+    <button class='primary' onclick='addManualBooking()'>Termin erfassen & sperren</button>
+  `
+}
+
 function servicesHtml(){
   return `
     <h2>Neue Behandlung hinzufügen</h2>
@@ -224,10 +302,11 @@ function renderApp(){
     <section class='card'>
       <div class='tabs'>
         <div class='tab ${tab==='bookings'?'active':''}' onclick='tab="bookings";renderApp()'>Buchungen</div>
+        <div class='tab ${tab==='manual'?'active':''}' onclick='tab="manual";renderApp()'>Manuell buchen</div>
         <div class='tab ${tab==='blocked'?'active':''}' onclick='tab="blocked";renderApp()'>Tage sperren</div>
         <div class='tab ${tab==='services'?'active':''}' onclick='tab="services";renderApp()'>Angebot</div>
       </div>
-      ${tab==='bookings'?bookingsHtml():tab==='blocked'?blockedHtml():servicesHtml()}
+      ${tab==='bookings'?bookingsHtml():tab==='manual'?manualHtml():tab==='blocked'?blockedHtml():servicesHtml()}
       <div class='note' style='text-align:center;margin-top:20px'><a href='#' onclick='logout();return false' style='color:var(--muted)'>Abmelden</a></div>
     </section>
   `
