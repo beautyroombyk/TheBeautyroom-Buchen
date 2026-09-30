@@ -4,6 +4,13 @@
 </style></head><body><main class='wrap'><div class='brand'><h1>THE BEAUTY ROOM</h1><em>by K</em><div class='sub'>Verwaltung</div></div><section id='app'></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
 const supa=supabase.createClient('https://gjnlctvhpneforvccqnx.supabase.co','sb_publishable_-RyuhfWXQvQ7jC8e0WswMg_qZw_CIau');
 const ADMIN_PASSWORD='FatihKim0903';
+const STUDIO_ADDRESS='Poststr. 2, 9000 St. Gallen';
+async function sendSms(to,message){
+  try{
+    let res=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to,message})});
+    if(!res.ok){let errBody=await res.json().catch(()=>null);console.error('SMS-Versand fehlgeschlagen an',to,res.status,errBody)}
+  }catch(err){console.error('SMS-Versand fehlgeschlagen an',to,err)}
+}
 const app=document.querySelector('#app');
 let tab='bookings',bookings=[],blocked=[],services=[],newAddon=false;
 let calMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
@@ -75,6 +82,12 @@ async function cancelBooking(id){
   if(!confirm('Diesen Termin wirklich stornieren?'))return;
   const {error}=await supa.from('bookings').update({status:'cancelled'}).eq('id',id);
   if(error){alert('Fehler beim Stornieren.');console.error(error);return}
+  await loadBookings();renderApp()
+}
+async function deleteBookingPermanently(id){
+  if(!confirm('Diesen Termin endgültig löschen? Das kann nicht rückgängig gemacht werden.'))return;
+  const {error}=await supa.from('bookings').delete().eq('id',id);
+  if(error){alert('Fehler beim Löschen.');console.error(error);return}
   await loadBookings();renderApp()
 }
 
@@ -150,12 +163,16 @@ function bookingsHtml(){
     const phone=b.customers?.phone||'';
     const svc=b.services?.name||'—';
     const cancelled=b.status==='cancelled';
+    const isPast=new Date(b.end_at)<now;
     return `<div class='booking'>
       <div class='top'>
         <div><b>${cust}</b><small>${svc}</small><small>${fmtDate(b.start_at)} · ${fmtTime(b.start_at)}–${fmtTime(b.end_at)}</small><small>${phone}</small>${b.customer_note?`<small>${b.customer_note}</small>`:''}</div>
         <span class='status ${cancelled?'cancelled':''}'>${cancelled?'storniert':'CHF '+b.total_price_chf}</span>
       </div>
-      ${!cancelled?`<button class='cancel-btn' onclick='cancelBooking("${b.id}")'>Termin stornieren</button>`:''}
+      <div style='display:flex;gap:14px'>
+        ${!cancelled&&!isPast?`<button class='cancel-btn' onclick='cancelBooking("${b.id}")'>Termin stornieren</button>`:''}
+        ${(cancelled||isPast)?`<button class='cancel-btn' onclick='deleteBookingPermanently("${b.id}")'>Endgültig löschen</button>`:''}
+      </div>
     </div>`
   }
   return `
@@ -237,6 +254,7 @@ async function addManualBooking(){
   if(!first||!last)return alert('Bitte Vor- und Nachname eingeben.');
   if(!date||!time)return alert('Bitte Datum und Uhrzeit eingeben.');
   if(!manualCart.length)return alert('Bitte mindestens eine Behandlung auswählen.');
+  if(phone&&!/^\+[1-9]\d{6,14}$/.test(phone))return alert('Bitte Handynummer im Format +41791234567 eingeben (oder leer lassen).');
   const dur=manualDuration(),price=manualPrice(),label=manualLabel();
   const primaryServiceId=services[manualCart[0].i].id;
   const startAt=new Date(date+'T'+time+':00');
@@ -251,9 +269,13 @@ async function addManualBooking(){
     const {error:e2}=await supa.from('bookings').insert({customer_id:cust.id,service_id:primaryServiceId,start_at:startAt.toISOString(),end_at:endAt.toISOString(),total_price_chf:price,status:'confirmed',source:'manual',customer_note:'Manuell erfasst (z.B. Instagram): '+label});
     if(e2)throw e2;
   }catch(err){console.error(err);alert('Fehler beim Speichern: '+(err.message||''));return}
+  if(phone){
+    const kundeMsg=`Hallo ${first}, dein Termin am ${date} um ${time} bei THE BEAUTY ROOM BY K ist bestätigt. Adresse: ${STUDIO_ADDRESS}`;
+    await sendSms(phone,kundeMsg)
+  }
   manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';
   await loadBookings();
-  alert('Termin wurde erfasst und ist jetzt im Online-Buchungssystem automatisch gesperrt.');
+  alert('Termin wurde erfasst und ist jetzt im Online-Buchungssystem automatisch gesperrt.'+(phone?' SMS-Bestätigung wurde verschickt.':' (Keine Handynummer angegeben, keine SMS verschickt.)'));
   tab='bookings';renderApp()
 }
 
