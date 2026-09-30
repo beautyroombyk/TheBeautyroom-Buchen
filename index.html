@@ -10,17 +10,26 @@
 </style></head><body><main class='wrap'><div class='brand'><h1>THE BEAUTY ROOM</h1><em>by K</em><div class='sub'>Lashes • Brows • Nails</div></div><div class='progress' id='prog'></div><section class='card' id='app'></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
 const supa=supabase.createClient('https://gjnlctvhpneforvccqnx.supabase.co','sb_publishable_-RyuhfWXQvQ7jC8e0WswMg_qZw_CIau');
 const FRIEND_PHONE='+41798884705';
+const STUDIO_ADDRESS='Poststr. 2, 9000 St. Gallen';
 let services=[],blockedRanges=[],dataLoaded=false;
+let bookingsCache={};
 
 function pad(n){return String(n).padStart(2,'0')}
 function todayStr(){let d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
 function minBookableStr(){let d=new Date();d.setDate(d.getDate()+1);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
 function isDateBlocked(dateStr){return blockedRanges.some(r=>!r.start_time&&dateStr>=r.start_date&&dateStr<=r.end_date)}
+function blockedReasonForDate(dateStr){const b=blockedRanges.find(r=>!r.start_time&&dateStr>=r.start_date&&dateStr<=r.end_date);return b&&b.reason?b.reason:null}
 function timeToMin(t){const [h,m]=t.split(':').map(Number);return h*60+m}
 function blockedTimeWindowsForDate(dateStr){
   return blockedRanges.filter(r=>r.start_time&&dateStr>=r.start_date&&dateStr<=r.end_date).map(r=>[timeToMin(r.start_time),timeToMin(r.end_time)])
 }
 function slotOverlapsBlocked(startMin,endMin,windows){return windows.some(([bs,be])=>startMin<be&&endMin>bs)}
+async function loadBookingsForDate(dateStr){
+  if(bookingsCache[dateStr])return bookingsCache[dateStr];
+  const {data,error}=await supa.from('bookings').select('start_at,end_at').neq('status','cancelled').gte('start_at',dateStr+'T00:00:00').lte('start_at',dateStr+'T23:59:59');
+  bookingsCache[dateStr]=error?[]:(data||[]);
+  return bookingsCache[dateStr]
+}
 
 // state.step: 1=Kategorien, 2=Behandlungen wählen (Mehrfachauswahl), 3=Datum&Zeit, 4=Daten, 5=Bestätigt
 // state.cart: [{i: serviceIndex, addon: bool}, ...]
@@ -30,7 +39,7 @@ const app=document.querySelector('#app'),prog=document.querySelector('#prog');
 async function loadData(){
   const [{data:svc},{data:blk}]=await Promise.all([
     supa.from('services').select('*').eq('active',true).order('sort_order'),
-    supa.from('blocked_times').select('start_date,end_date,start_time,end_time')
+    supa.from('blocked_times').select('start_date,end_date,start_time,end_time,reason')
   ]);
   services=svc||[];blockedRanges=blk||[];dataLoaded=true;render()
 }
@@ -97,10 +106,14 @@ function render(){
   else if(state.step===3){
     const min=minBookableStr();
     const dur=cartDuration();
+    if(state.date&&!isDateBlocked(state.date)&&!bookingsCache[state.date]){
+      loadBookingsForDate(state.date).then(render)
+    }
+    const reason=state.date?blockedReasonForDate(state.date):null;
     app.innerHTML=`<button class='back' onclick='state.step=1;render()'>← Zurück zur Auswahl</button><h2>Datum & Uhrzeit</h2>
       <div class='summary' style='margin-bottom:14px'><b>${cartLabel()}</b><br>${dur} Min. · CHF ${cartPrice()}</div>
       <div class='field'><label>Datum</label><input type='date' min='${min}' value='${state.date}' onchange="let v=this.value<minBookableStr()?minBookableStr():this.value;this.value=v;state.date=v;state.time='';render()"></div>
-      ${state.date?(isDateBlocked(state.date)?`<div class='note'>An diesem Tag ist das Studio leider geschlossen. Bitte wähle ein anderes Datum.</div>`:`<div class='grid'>${times().map(t=>`<button class='time ${state.time===t?'sel':''}' onclick="state.time='${t}';render()">${t}</button>`).join('')}</div>`):''}
+      ${state.date?(isDateBlocked(state.date)?`<div class='note'>An diesem Tag ist das Studio leider geschlossen${reason?(': '+reason):''}. Bitte wähle ein anderes Datum.</div>`:(bookingsCache[state.date]?`<div class='grid'>${times().map(t=>`<button class='time ${state.time===t?'sel':''}' onclick="state.time='${t}';render()">${t}</button>`).join('')}</div>`:`<div class='loading'>Verfügbare Zeiten werden geladen...</div>`)):''}
       <button class='primary' ${!state.date||!state.time?'disabled':''} onclick='state.step=4;render()'>Weiter →</button>
       <div class='note'>Mo–Fr 09:00–20:00 · Sa 09:00–15:00 · So geschlossen · Buchung mind. 24h im Voraus</div>`
   }
@@ -123,9 +136,15 @@ function times(){
   let end=d.getDay()===6?15*60:20*60;
   const dur=cartDuration();
   const windows=blockedTimeWindowsForDate(state.date);
+  const dayBookings=bookingsCache[state.date]||[];
+  const bookingWindows=dayBookings.map(b=>{
+    const s=new Date(b.start_at),e=new Date(b.end_at);
+    return [s.getHours()*60+s.getMinutes(),e.getHours()*60+e.getMinutes()]
+  });
   let a=[];
   for(let m=9*60;m+dur<=end;m+=30){
     if(slotOverlapsBlocked(m,m+dur,windows))continue;
+    if(slotOverlapsBlocked(m,m+dur,bookingWindows))continue;
     a.push(pad(Math.floor(m/60))+':'+pad(m%60))
   }
   return a
@@ -156,8 +175,9 @@ async function book(){
     let{error:e3}=await supa.from('bookings').insert({customer_id:cust.id,service_id:primaryServiceId,start_at:startAt.toISOString(),end_at:endAt.toISOString(),total_price_chf:price,status:'confirmed',source:'online',customer_note:'Behandlungen: '+label});
     if(e3)throw e3
   }catch(err){console.error(err);btn.disabled=false;btn.textContent='Termin jetzt buchen →';return alert('Es gab ein Problem beim Speichern. Bitte versuch es nochmal.')}
-  const kundeMsg=`Hallo ${state.first}, dein Termin am ${state.date} um ${state.time} bei THE BEAUTY ROOM BY K ist bestätigt.`;
-  const freundinMsg=`Neue Buchung: ${state.first} ${state.last} am ${state.date} um ${state.time} (${label}).`;
+  delete bookingsCache[state.date];
+  const kundeMsg=`Hallo ${state.first}, dein Termin am ${state.date} um ${state.time} bei THE BEAUTY ROOM BY K ist bestätigt. Adresse: ${STUDIO_ADDRESS}`;
+  const freundinMsg=`Neue Buchung: ${state.first} ${state.last} am ${state.date} um ${state.time} (${label}). Adresse: ${STUDIO_ADDRESS}`;
   await Promise.allSettled([sendSms(state.phone,kundeMsg),sendSms(FRIEND_PHONE,freundinMsg)]);
   state.step=5;render()
 }
