@@ -140,10 +140,13 @@ function times(){
     const s=new Date(b.start_at),e=new Date(b.end_at);
     return [s.getHours()*60+s.getMinutes(),e.getHours()*60+e.getMinutes()]
   });
+  const cutoff=new Date(Date.now()+24*60*60*1000);
   let a=[];
   for(let m=9*60;m+dur<=end;m+=30){
     if(slotOverlapsBlocked(m,m+dur,windows))continue;
     if(slotOverlapsBlocked(m,m+dur,bookingWindows))continue;
+    const slotStart=new Date(state.date+'T'+pad(Math.floor(m/60))+':'+pad(m%60)+':00');
+    if(slotStart<cutoff)continue;
     a.push(pad(Math.floor(m/60))+':'+pad(m%60))
   }
   return a
