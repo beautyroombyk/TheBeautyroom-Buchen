@@ -15,7 +15,7 @@ async function sendSms(to,message){
 const app=document.querySelector('#app');
 let tab='bookings',bookings=[],blocked=[],services=[],newAddon=false;
 let calMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
-let selectedDate=null;
+let selectedDate=toDateStr(new Date());
 let manualCart=[];
 let manualFirst='',manualLast='',manualPhone='',manualDate='',manualTime='';
 
@@ -35,6 +35,7 @@ function bookingDateStr(b){const d=new Date(b.start_at);return toDateStr(d)}
 function changeMonth(delta){calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()+delta,1);renderApp()}
 function selectDay(dateStr){selectedDate=(selectedDate===dateStr)?null:dateStr;renderApp()}
 function clearDayFilter(){selectedDate=null;renderApp()}
+function goToday(){calMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);selectedDate=toDateStr(new Date());renderApp()}
 
 function calendarHtml(){
   const y=calMonth.getFullYear(),m=calMonth.getMonth();
@@ -60,6 +61,7 @@ function calendarHtml(){
   return `<div class='calendar'>
     <div class='cal-head'><button onclick='changeMonth(-1)'>‹</button><b>${monthNames[m]} ${y}</b><button onclick='changeMonth(1)'>›</button></div>
     <div class='cal-grid'>${dows.map(d=>`<div class='cal-dow'>${d}</div>`).join('')}${cells}</div>
+    ${selectedDate!==todayStr?`<div class='clear-filter' style='margin-bottom:0'><a href='#' onclick='goToday();return false'>Heute</a></div>`:''}
   </div>`
 }
 
@@ -153,7 +155,8 @@ function bookingsHtml(){
   if(selectedDate){
     const dayBookings=list.filter(b=>bookingDateStr(b)===selectedDate);
     upcoming=dayBookings;past=[];
-    heading=`Termine am ${selectedDate.split('-').reverse().join('.')}`;
+    const isToday=selectedDate===toDateStr(now);
+    heading=isToday?'Termine heute':`Termine am ${selectedDate.split('-').reverse().join('.')}`;
   }else{
     upcoming=bookings.filter(b=>new Date(b.end_at)>=now&&b.status!=='cancelled');
     past=bookings.filter(b=>new Date(b.end_at)<now||b.status==='cancelled');
