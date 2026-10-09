@@ -228,12 +228,12 @@ function setManualPhone(v){manualPhone=v}
 function setManualDate(v){manualDate=v;manualTime='';renderApp()}
 function setManualTime(v){manualTime=v}
 function manualPad(n){return String(n).padStart(2,'0')}
-// Admin darf IMMER buchen (auch gesperrte Zeiten, Sonntag, am gleichen Tag, weniger als 24h vorher).
+// Admin darf IMMER buchen (auch gesperrte Zeiten, Sonntag, am gleichen Tag, weniger als 24h vorher, ausserhalb der Öffnungszeiten).
 // Gesperrte/belegte Zeiten werden nur markiert, nicht ausgeblendet.
 function manualTimes(dateStr){
   if(!dateStr)return[];
   const d=new Date(dateStr+'T12:00:00');
-  const end=d.getDay()===6?15*60:20*60;
+  const bizEnd=d.getDay()===0?0:(d.getDay()===6?15*60:20*60);
   const dur=manualDuration()||30;
   const dayBlocks=blocked.filter(r=>dateStr>=r.start_date&&dateStr<=r.end_date);
   const wholeBlocked=dayBlocks.some(r=>!r.start_time);
@@ -247,10 +247,11 @@ function manualTimes(dateStr){
     return [s.getHours()*60+s.getMinutes(),e.getHours()*60+e.getMinutes()]
   });
   let a=[];
-  for(let m=9*60;m+dur<=end;m+=30){
+  for(let m=6*60;m+dur<=24*60;m+=30){
     let note='';
     if(wholeBlocked||windows.some(([bs,be])=>m<be&&m+dur>bs))note='gesperrt';
     else if(busy.some(([bs,be])=>m<be&&m+dur>bs))note='belegt';
+    else if(m<9*60||m+dur>bizEnd)note='ausserhalb Öffnungszeiten';
     a.push({t:manualPad(Math.floor(m/60))+':'+manualPad(m%60),note})
   }
   return a
@@ -340,7 +341,7 @@ function manualHtml(){
         (manualTimes(manualDate).length?`<select id='m_time' onchange='setManualTime(this.value)'>
           <option value=''>Bitte wählen...</option>
           ${manualTimes(manualDate).map(x=>`<option value='${x.t}' ${manualTime===x.t?'selected':''}>${x.t}${x.note?' ('+x.note+')':''}</option>`).join('')}
-        </select><div class='note'>Als Admin kannst du jede Zeit wählen, auch am gleichen Tag, bei gesperrten Zeiten oder am Sonntag.</div>`:`<div class='note' style='margin-top:0'>Für diese Dauer passt keine Zeit in die Öffnungszeiten.</div>`)}
+        </select><div class='note'>Als Admin kannst du jede Zeit wählen (ab 06:00), auch ausserhalb der Öffnungszeiten, am gleichen Tag, bei gesperrten Zeiten oder am Sonntag.</div>`:`<div class='note' style='margin-top:0'>Für diese Dauer passt keine Zeit mehr in diesen Tag.</div>`)}
     </div>
     <button class='primary' onclick='addManualBooking()'>Termin erfassen & sperren</button>
   `
