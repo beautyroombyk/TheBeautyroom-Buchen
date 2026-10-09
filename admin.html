@@ -18,6 +18,7 @@ let calMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 let selectedDate=toDateStr(new Date());
 let manualCart=[];
 let manualFirst='',manualLast='',manualPhone='',manualDate='',manualTime='';
+let editing=null;
 
 function isLoggedIn(){return sessionStorage.getItem('beautyroom_admin')==='1'}
 function login(){
@@ -76,7 +77,7 @@ function calendarHtml(){
 }
 
 async function loadBookings(){
-  const {data,error}=await supa.from('bookings').select('id,start_at,end_at,total_price_chf,status,customer_note,customers(first_name,last_name,phone),services(name)').order('start_at',{ascending:true});
+  const {data,error}=await supa.from('bookings').select('id,customer_id,service_id,start_at,end_at,total_price_chf,status,customer_note,customers(first_name,last_name,phone),services(name)').order('start_at',{ascending:true});
   if(error){console.error(error);bookings=[];return}
   bookings=data||[]
 }
@@ -184,6 +185,7 @@ function bookingsHtml(){
         <span class='status ${cancelled?'cancelled':''}'>${cancelled?'storniert':'CHF '+b.total_price_chf}</span>
       </div>
       <div style='display:flex;gap:14px'>
+        ${!cancelled&&!isPast?`<button class='cancel-btn' style='color:var(--accent)' onclick='startEdit("${b.id}")'>Termin ändern</button>`:''}
         ${!cancelled&&!isPast?`<button class='cancel-btn' onclick='cancelBooking("${b.id}")'>Termin stornieren</button>`:''}
         ${(cancelled||isPast)?`<button class='cancel-btn' onclick='deleteBookingPermanently("${b.id}")'>Endgültig löschen</button>`:''}
       </div>
@@ -228,13 +230,13 @@ function setManualPhone(v){manualPhone=v}
 function setManualDate(v){manualDate=v;manualTime='';renderApp()}
 function setManualTime(v){manualTime=v}
 function manualPad(n){return String(n).padStart(2,'0')}
-// Admin darf IMMER buchen (auch gesperrte Zeiten, Sonntag, am gleichen Tag, weniger als 24h vorher, ausserhalb der Öffnungszeiten).
+// Admin darf IMMER buchen (auch gesperrte Zeiten, Sonntag, am gleichen Tag, weniger als 24h vorher).
 // Gesperrte/belegte Zeiten werden nur markiert, nicht ausgeblendet.
 function manualTimes(dateStr){
   if(!dateStr)return[];
   const d=new Date(dateStr+'T12:00:00');
   const bizEnd=d.getDay()===0?0:(d.getDay()===6?15*60:20*60);
-  const dur=manualDuration()||30;
+  const dur=manualDuration()||(editing?editing.dur:30);
   const dayBlocks=blocked.filter(r=>dateStr>=r.start_date&&dateStr<=r.end_date);
   const wholeBlocked=dayBlocks.some(r=>!r.start_time);
   const windows=dayBlocks.filter(r=>r.start_time).map(r=>{
@@ -242,7 +244,7 @@ function manualTimes(dateStr){
     const [eh,em]=r.end_time.split(':').map(Number);
     return [sh*60+sm,eh*60+em]
   });
-  const busy=bookings.filter(b=>b.status!=='cancelled'&&bookingDateStr(b)===dateStr).map(b=>{
+  const busy=bookings.filter(b=>b.status!=='cancelled'&&bookingDateStr(b)===dateStr&&!(editing&&b.id===editing.id)).map(b=>{
     const s=new Date(b.start_at),e=new Date(b.end_at);
     return [s.getHours()*60+s.getMinutes(),e.getHours()*60+e.getMinutes()]
   });
@@ -308,11 +310,68 @@ async function addManualBooking(){
   tab='bookings';renderApp()
 }
 
+function startEdit(id){
+  const b=bookings.find(x=>x.id===id);if(!b)return;
+  const s=new Date(b.start_at),e=new Date(b.end_at);
+  editing={id:b.id,customerId:b.customer_id,serviceId:b.service_id,svcName:b.services?.name||'',dur:Math.round((e-s)/60000),price:b.total_price_chf,note:b.customer_note||'',first:b.customers?.first_name||'',last:b.customers?.last_name||'',phone:b.customers?.phone||''};
+  manualCart=[];
+  manualFirst=editing.first;manualLast=editing.last;manualPhone=editing.phone;
+  manualDate=bookingDateStr(b);
+  manualTime=manualPad(s.getHours())+':'+manualPad(s.getMinutes());
+  tab='manual';renderApp();window.scrollTo(0,0)
+}
+function cancelEdit(){
+  editing=null;manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';
+  tab='bookings';renderApp()
+}
+async function saveEditedBooking(){
+  if(!editing)return;
+  const first=manualFirst.trim(),last=manualLast.trim(),phone=manualPhone.trim();
+  const date=manualDate,time=manualTime;
+  if(!first||!last)return alert('Bitte Vor- und Nachname eingeben.');
+  if(!date||!time)return alert('Bitte Datum und Uhrzeit eingeben.');
+  if(phone&&!/^\+[1-9]\d{6,14}$/.test(phone))return alert('Bitte Handynummer im Format +41791234567 eingeben (oder leer lassen).');
+  const changedSvc=manualCart.length>0;
+  const dur=changedSvc?manualDuration():editing.dur;
+  const price=changedSvc?manualPrice():editing.price;
+  const serviceId=changedSvc?services[manualCart[0].i].id:editing.serviceId;
+  const label=changedSvc?manualLabel():editing.svcName;
+  const note=changedSvc?((editing.note?editing.note+' | ':'')+'Behandlung geändert: '+label):editing.note;
+  const startAt=new Date(date+'T'+time+':00');
+  const endAt=new Date(startAt.getTime()+dur*60000);
+  const slotInfo=manualTimes(date).find(x=>x.t===time);
+  if(slotInfo&&slotInfo.note==='gesperrt'&&!confirm('Achtung: Diese Zeit ist im Admin-Bereich gesperrt (z.B. Ferien). Trotzdem verschieben?'))return;
+  try{
+    const {data:existing,error:eCheck}=await supa.from('bookings').select('id,start_at,end_at').neq('status','cancelled').neq('id',editing.id).gte('start_at',date+'T00:00:00').lte('start_at',date+'T23:59:59');
+    if(eCheck)throw eCheck;
+    const overlap=(existing||[]).some(b=>{const bs=new Date(b.start_at),be=new Date(b.end_at);return startAt<be&&endAt>bs});
+    if(overlap&&!confirm('Achtung: In diesem Zeitraum existiert bereits ein Termin. Trotzdem speichern?'))return;
+    if(first!==editing.first||last!==editing.last||phone!==editing.phone){
+      const {data:cu,error:e1}=await supa.from('customers').update({first_name:first,last_name:last,phone:phone||null}).eq('id',editing.customerId).select();
+      if(e1)throw e1;
+      if(!cu||!cu.length)throw new Error('Kundendaten konnten nicht geändert werden (fehlende Berechtigung in Supabase, siehe fix_update_customers.sql).');
+    }
+    const {data:bu,error:e2}=await supa.from('bookings').update({service_id:serviceId,start_at:startAt.toISOString(),end_at:endAt.toISOString(),total_price_chf:price,customer_note:note}).eq('id',editing.id).select();
+    if(e2)throw e2;
+    if(!bu||!bu.length)throw new Error('Termin konnte nicht geändert werden (fehlende Berechtigung in Supabase).');
+  }catch(err){console.error(err);alert('Fehler beim Speichern: '+(err.message||''));return}
+  let smsSent=false;
+  if(phone&&confirm('Termin wurde geändert. Kundin per SMS über den neuen Termin informieren?')){
+    await sendSms(phone,`Hallo ${first}, dein Termin bei THE BEAUTY ROOM BY K wurde geändert: neu am ${date} um ${time}. Adresse: ${STUDIO_ADDRESS}`);
+    smsSent=true
+  }
+  editing=null;manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';
+  await loadBookings();
+  selectedDate=date;calMonth=new Date(startAt.getFullYear(),startAt.getMonth(),1);
+  tab='bookings';renderApp();
+  alert('Termin wurde geändert.'+(smsSent?' SMS wurde verschickt.':''))
+}
+
 function manualHtml(){
   const cats=[...new Set(services.map(s=>s.category))];
   return `
-    <h2>Manuelle Buchung erfassen</h2>
-    <div class='note' style='margin:-4px 0 14px'>Für Kundinnen, die z.B. per Instagram-DM buchen. Die Zeit wird danach automatisch im Online-Buchungssystem gesperrt, damit niemand doppelt buchen kann.</div>
+    <h2>${editing?'Termin ändern':'Manuelle Buchung erfassen'}</h2>
+    ${editing?`<div class='note' style='margin:-4px 0 14px'>Ändere Name, Handynummer, Datum oder Uhrzeit. Die Behandlung bleibt <b>${editing.svcName||'unverändert'}</b> (${editing.dur} Min.), ausser du wählst unten andere Behandlungen aus.</div>`:`<div class='note' style='margin:-4px 0 14px'>Für Kundinnen, die z.B. per Instagram-DM buchen. Die Zeit wird danach automatisch im Online-Buchungssystem gesperrt, damit niemand doppelt buchen kann.</div>`}
     <div class='row2'>
       <div class='field'><label>Vorname *</label><input type='text' id='m_first' value='${manualFirst}' oninput='setManualFirst(this.value)'></div>
       <div class='field'><label>Nachname *</label><input type='text' id='m_last' value='${manualLast}' oninput='setManualLast(this.value)'></div>
@@ -343,7 +402,7 @@ function manualHtml(){
           ${manualTimes(manualDate).map(x=>`<option value='${x.t}' ${manualTime===x.t?'selected':''}>${x.t}${x.note?' ('+x.note+')':''}</option>`).join('')}
         </select><div class='note'>Als Admin kannst du jede Zeit wählen (ab 06:00), auch ausserhalb der Öffnungszeiten, am gleichen Tag, bei gesperrten Zeiten oder am Sonntag.</div>`:`<div class='note' style='margin-top:0'>Für diese Dauer passt keine Zeit mehr in diesen Tag.</div>`)}
     </div>
-    <button class='primary' onclick='addManualBooking()'>Termin erfassen & sperren</button>
+    ${editing?`<button class='primary' onclick='saveEditedBooking()'>Änderungen speichern</button><div class='clear-filter'><a href='#' onclick='cancelEdit();return false'>Abbrechen</a></div>`:`<button class='primary' onclick='addManualBooking()'>Termin erfassen & sperren</button>`}
   `
 }
 
