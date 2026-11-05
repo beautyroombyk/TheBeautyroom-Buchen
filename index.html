@@ -7,10 +7,17 @@
 .sticky-bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 18px;box-shadow:0 -8px 20px #76533212;max-width:520px;margin:auto}
 .sticky-bar .row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:8px}
 .cat-btn{position:relative}
+.policy{background:#fbf5ec;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:16px 0 8px;font-size:13px;line-height:1.5}
+.policy ul{margin:6px 0 0;padding-left:18px}
+.policy li{margin:4px 0}
+.accept{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:12px 0 4px;cursor:pointer}
+.accept input{width:20px;height:20px;margin-top:1px;accent-color:var(--accent);flex-shrink:0}
 </style></head><body><main class='wrap'><div class='brand'><h1>THE BEAUTY ROOM</h1><em>by K</em><div class='sub'>Lashes • Brows • Nails</div></div><div class='progress' id='prog'></div><section class='card' id='app'></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
 const supa=supabase.createClient('https://gjnlctvhpneforvccqnx.supabase.co','sb_publishable_-RyuhfWXQvQ7jC8e0WswMg_qZw_CIau');
 const FRIEND_PHONE='+41798884705';
 const STUDIO_ADDRESS='Poststr. 2, 9000 St. Gallen';
+const BLOCKED_MSG='Eine Online-Buchung ist mit dieser Nummer leider nicht möglich. Bitte melde dich direkt bei uns.';
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 let services=[],blockedRanges=[],dataLoaded=false;
 let bookingsCache={};
 
@@ -33,7 +40,12 @@ async function loadBookingsForDate(dateStr){
 
 // state.step: 1=Kategorien, 2=Behandlungen wählen (Mehrfachauswahl), 3=Datum&Zeit, 4=Daten, 5=Bestätigt
 // state.cart: [{i: serviceIndex, addon: bool}, ...]
-let state={step:1,cat:null,cart:[],date:minBookableStr(),time:'',first:'',last:'',phone:''};
+let state={step:1,cat:null,cart:[],date:minBookableStr(),time:'',first:'',last:'',phone:'',accepted:false,prefilled:false};
+// Daten vom letzten Besuch (nur auf diesem Geraet gespeichert), damit Stammkundinnen nicht alles neu tippen muessen
+try{
+  const sv=JSON.parse(localStorage.getItem('beautyroom_customer')||'null');
+  if(sv&&sv.first&&sv.last&&sv.phone){state.first=sv.first;state.last=sv.last;state.phone=sv.phone;state.prefilled=true}
+}catch(e){}
 const app=document.querySelector('#app'),prog=document.querySelector('#prog');
 
 async function loadData(){
@@ -119,12 +131,12 @@ function render(){
 
   else if(state.step===4){
     const dur=cartDuration(),price=cartPrice();
-    app.innerHTML=`<button class='back' onclick='state.step=3;render()'>← Zurück</button><h2>Deine Daten</h2><div class='summary'><b>${cartLabel()}</b><br>${state.date} · ${state.time}<br>${dur} Min. · CHF ${price}</div><div class='field'><label>Vorname *</label><input id='first' value='${state.first}'></div><div class='field'><label>Nachname *</label><input id='last' value='${state.last}'></div><div class='field'><label>Handynummer *</label><input id='phone' type='tel' placeholder='+41 79 123 45 67' value='${state.phone}'></div><button class='primary' id='bookBtn' onclick='book()'>Termin jetzt buchen →</button><div class='note'>Mit der Buchung werden die eingegebenen Daten zur Terminverwaltung verwendet.</div>`
+    app.innerHTML=`<button class='back' onclick='state.step=3;render()'>← Zurück</button><h2>Deine Daten</h2><div class='summary'><b>${cartLabel()}</b><br>${state.date} · ${state.time}<br>${dur} Min. · CHF ${price}</div>${state.prefilled?`<div class='note' style='margin:12px 0 0'>Deine Daten vom letzten Besuch wurden eingetragen. Bitte kurz prüfen.</div>`:''}<div class='field'><label>Vorname *</label><input id='first' value='${esc(state.first)}' oninput='state.first=this.value'></div><div class='field'><label>Nachname *</label><input id='last' value='${esc(state.last)}' oninput='state.last=this.value'></div><div class='field'><label>Handynummer *</label><input id='phone' type='tel' placeholder='+41791234567' value='${esc(state.phone)}' oninput='state.phone=this.value'></div><div class='policy'><b>Buchungsrichtlinien</b><ul><li>Bei Absage weniger als 24 Stunden vor dem Termin werden 50 % des Preises verrechnet.</li><li>Bei mehr als 15 Minuten Verspätung behalte ich mir das Recht vor, ebenfalls 50 % des Preises zu verrechnen.</li></ul></div><label class='accept'><input type='checkbox' id='accept' ${state.accepted?'checked':''} onchange='state.accepted=this.checked'><span>Ich habe die Buchungsrichtlinien gelesen und bin einverstanden.</span></label><button class='primary' id='bookBtn' onclick='book()'>Termin jetzt buchen →</button><div class='note'>Mit der Buchung werden die eingegebenen Daten zur Terminverwaltung verwendet.</div>`
   }
 
   else{
     const dur=cartDuration();
-    app.innerHTML=`<div class='ok'><div class='check'>✓</div><h2>Termin bestätigt!</h2><p>Vielen Dank, ${state.first}.</p><div class='summary'><b>${cartLabel()}</b><br>${state.date} · ${state.time}<br>${dur} Min.<br>THE BEAUTY ROOM BY K · St. Gallen</div><p>Du erhältst eine Bestätigungs-SMS.</p></div>`
+    app.innerHTML=`<div class='ok'><div class='check'>✓</div><h2>Termin bestätigt!</h2><p>Vielen Dank, ${esc(state.first)}.</p><div class='summary'><b>${cartLabel()}</b><br>${state.date} · ${state.time}<br>${dur} Min.<br>THE BEAUTY ROOM BY K · St. Gallen</div><p>Du erhältst eine Bestätigungs-SMS.</p><p class='note' style='margin-top:14px'>Hinweis: Bei Absage weniger als 24 Stunden vor dem Termin werden 50 % des Preises verrechnet. Bei mehr als 15 Minuten Verspätung kann ebenfalls 50 % verrechnet werden.</p></div>`
   }
 }
 
@@ -166,9 +178,15 @@ async function book(){
   if(!state.first||!state.last||!state.phone)return alert('Bitte Vorname, Nachname und Handynummer ausfüllen.');
   if(!/^\+[1-9]\d{6,14}$/.test(state.phone))return alert('Bitte Handynummer im Format +41791234567 eingeben.');
   if(!state.cart.length)return alert('Bitte mindestens eine Behandlung auswählen.');
+  if(!document.querySelector('#accept').checked)return alert('Bitte bestätige die Buchungsrichtlinien, um fortzufahren.');
+  state.accepted=true;
   const dur=cartDuration(),price=cartPrice(),label=cartLabel();
   const primaryServiceId=services[state.cart[0].i].id;
   let btn=document.querySelector('#bookBtn');btn.disabled=true;btn.textContent='Wird gebucht...';
+  try{
+    const {data:isBlocked,error:eb}=await supa.rpc('is_phone_blocked',{p:state.phone});
+    if(!eb&&isBlocked===true){btn.disabled=false;btn.textContent='Termin jetzt buchen →';return alert(BLOCKED_MSG)}
+  }catch(e){}
   try{
     let{data:cust,error:e1}=await supa.from('customers').insert({first_name:state.first,last_name:state.last,phone:state.phone}).select().single();
     if(e1)throw e1;
@@ -176,7 +194,12 @@ async function book(){
     let endAt=new Date(startAt.getTime()+dur*60000);
     let{error:e3}=await supa.from('bookings').insert({customer_id:cust.id,service_id:primaryServiceId,start_at:startAt.toISOString(),end_at:endAt.toISOString(),total_price_chf:price,status:'confirmed',source:'online',customer_note:'Behandlungen: '+label});
     if(e3)throw e3
-  }catch(err){console.error(err);btn.disabled=false;btn.textContent='Termin jetzt buchen →';return alert('Es gab ein Problem beim Speichern. Bitte versuch es nochmal.')}
+  }catch(err){
+    console.error(err);btn.disabled=false;btn.textContent='Termin jetzt buchen →';
+    if(String((err&&err.message)||'').includes('phone_blocked'))return alert(BLOCKED_MSG);
+    return alert('Es gab ein Problem beim Speichern. Bitte versuch es nochmal.')
+  }
+  try{localStorage.setItem('beautyroom_customer',JSON.stringify({first:state.first,last:state.last,phone:state.phone}))}catch(e){}
   delete bookingsCache[state.date];
   const kundeMsg=`Hallo ${state.first}, dein Termin am ${state.date} um ${state.time} bei THE BEAUTY ROOM BY K ist bestätigt. Adresse: ${STUDIO_ADDRESS}`;
   const freundinMsg=`Neue Buchung: ${state.first} ${state.last} am ${state.date} um ${state.time} (${label}). Adresse: ${STUDIO_ADDRESS}`;
