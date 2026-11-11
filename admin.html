@@ -20,6 +20,7 @@ let selectedDate=toDateStr(new Date());
 let manualCart=[];
 let manualFirst='',manualLast='',manualPhone='',manualDate='',manualTime='';
 let editing=null;
+let svcEdit=null;
 let customers=[],flags={},flagsOk=true,custSearch='',custOpen=null,profilesCache=[];
 let manualSearch='',manualResults=[];
 
@@ -161,6 +162,24 @@ async function addService(){
   if(error){alert('Fehler beim Speichern.');console.error(error);return}
   newAddon=false;
   await loadServices();renderApp()
+}
+function startSvcEdit(id){svcEdit=id;renderApp()}
+function cancelSvcEdit(){svcEdit=null;renderApp()}
+async function saveService(id){
+  const g=x=>document.querySelector('#e_'+x).value.trim();
+  const category=g('category'),name=g('name');
+  const duration=parseInt(g('duration')),price=parseFloat(g('price'));
+  if(!category||!name||!duration||isNaN(price))return alert('Bitte Kategorie, Name, Dauer und Preis ausfüllen.');
+  const payload={category,name,duration_minutes:duration,price_chf:price};
+  const an=g('addon_name');
+  if(an){
+    const ad=parseInt(g('addon_duration')),ap=parseFloat(g('addon_price'));
+    if(!ad||isNaN(ap))return alert('Bitte Dauer und Preis der Zusatzoption ausfüllen, oder den Namen leer lassen (= keine Zusatzoption).');
+    payload.addon_name=an;payload.addon_duration_minutes=ad;payload.addon_price_chf=ap
+  }else{payload.addon_name=null;payload.addon_duration_minutes=null;payload.addon_price_chf=null}
+  const {data,error}=await supa.from('services').update(payload).eq('id',id).select();
+  if(error||!data||!data.length){console.error(error);alert('Fehler: Änderung konnte nicht gespeichert werden. Wurde fix_update_services.sql in Supabase ausgeführt?');return}
+  svcEdit=null;await loadServices();renderApp()
 }
 async function toggleServiceActive(id,active){
   const {error}=await supa.from('services').update({active:!active}).eq('id',id);
@@ -581,10 +600,28 @@ function servicesHtml(){
     <button class='primary' onclick='addService()'>Behandlung hinzufügen</button>
     <hr class='divider'>
     <h2>Bestehende Behandlungen</h2>
-    ${services.length?services.map(s=>`
+    ${services.length?services.map(s=>s.id===svcEdit?`
+      <div class='booking'>
+        <h3>Behandlung ändern</h3>
+        <div class='field'><label>Kategorie</label><input type='text' id='e_category' list='cat_list' value='${esc(s.category)}'></div>
+        <div class='field'><label>Name</label><input type='text' id='e_name' value='${esc(s.name)}'></div>
+        <div class='row2'>
+          <div class='field'><label>Dauer (Min.)</label><input type='number' id='e_duration' value='${esc(s.duration_minutes)}'></div>
+          <div class='field'><label>Preis (CHF)</label><input type='number' step='0.01' id='e_price' value='${esc(s.price_chf)}'></div>
+        </div>
+        <div class='field'><label>Zusatzoption: Name (leer = keine Zusatzoption)</label><input type='text' id='e_addon_name' value='${esc(s.addon_name||'')}'></div>
+        <div class='row2'>
+          <div class='field'><label>Zusatz-Dauer (Min.)</label><input type='number' id='e_addon_duration' value='${esc(s.addon_duration_minutes||'')}'></div>
+          <div class='field'><label>Zusatz-Preis (CHF)</label><input type='number' step='0.01' id='e_addon_price' value='${esc(s.addon_price_chf==null?'':s.addon_price_chf)}'></div>
+        </div>
+        <button class='primary' onclick='saveService("${s.id}")'>Änderungen speichern</button>
+        <div class='clear-filter'><a href='#' onclick='cancelSvcEdit();return false'>Abbrechen</a></div>
+        <div class='note'>Bereits gebuchte Termine behalten ihren damaligen Preis.</div>
+      </div>`:`
       <div class='service-item'>
         <div><b>${s.name}</b><small>${s.category} · ${s.duration_minutes} Min. · CHF ${s.price_chf}${s.addon_name?` · +${s.addon_name} (${s.addon_duration_minutes} Min., CHF ${s.addon_price_chf})`:''}</small>${!s.active?`<small style='color:#a44'>deaktiviert</small>`:''}</div>
         <div style='display:flex;flex-direction:column;gap:6px;align-items:end'>
+          <button class='del-btn' style='color:var(--accent)' onclick='startSvcEdit("${s.id}")'>Bearbeiten</button>
           <button class='del-btn' onclick='toggleServiceActive("${s.id}",${s.active})'>${s.active?'Deaktivieren':'Aktivieren'}</button>
           <button class='del-btn' onclick='deleteService("${s.id}")'>Löschen</button>
         </div>
