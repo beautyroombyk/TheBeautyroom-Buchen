@@ -22,6 +22,7 @@ let manualFirst='',manualLast='',manualPhone='',manualDate='',manualTime='';
 let editing=null;
 let svcEdit=null;
 let weekOffset=0;
+let manualDurOv='';
 let customers=[],flags={},flagsOk=true,custSearch='',custOpen=null,profilesCache=[];
 let manualSearch='',manualResults=[];
 
@@ -302,7 +303,7 @@ function manualTimes(dateStr){
   if(!dateStr)return[];
   const d=new Date(dateStr+'T12:00:00');
   const bizEnd=d.getDay()===0?0:(d.getDay()===6?15*60:20*60);
-  const dur=manualDuration()||(editing?editing.dur:30);
+  const dur=effectiveDur();
   const dayBlocks=blocked.filter(r=>dateStr>=r.start_date&&dateStr<=r.end_date);
   const wholeBlocked=dayBlocks.some(r=>!r.start_time);
   const windows=dayBlocks.filter(r=>r.start_time).map(r=>{
@@ -328,10 +329,24 @@ function manualToggleItem(i){
   const idx=manualCart.findIndex(c=>c.i===i);
   if(idx>=0)manualCart.splice(idx,1);
   else manualCart.push({i,addon:false});
-  renderApp()
+  manualDurOv='';renderApp()
 }
 function manualToggleAddon(i){
-  const item=manualCart.find(c=>c.i===i);if(item){item.addon=!item.addon;renderApp()}
+  const item=manualCart.find(c=>c.i===i);if(item){item.addon=!item.addon;manualDurOv='';renderApp()}
+}
+function effectiveDur(){
+  const o=parseInt(manualDurOv);
+  if(o>0)return o;
+  const a=manualDuration();
+  return a||(editing?editing.dur:30)
+}
+function setManualDurOv(v){manualDurOv=v;renderApp()}
+function durOptionsHtml(){
+  const auto=manualDuration()||(editing?editing.dur:0);
+  const vals=new Set();for(let m=15;m<=480;m+=15)vals.add(m);
+  const cur=parseInt(manualDurOv);if(cur>0)vals.add(cur);
+  const fmt=m=>(m>=60?Math.floor(m/60)+' Std.'+(m%60?' '+(m%60)+' Min.':''):m+' Min.');
+  return `<option value='' ${manualDurOv===''?'selected':''}>Automatisch${auto?' ('+fmt(auto)+')':''}</option>`+[...vals].sort((a,b)=>a-b).map(m=>`<option value='${m}' ${String(m)===String(manualDurOv)?'selected':''}>${fmt(m)}</option>`).join('')
 }
 function manualDuration(){return manualCart.reduce((sum,c)=>{const s=services[c.i];return sum+s.duration_minutes+(c.addon?s.addon_duration_minutes||0:0)},0)}
 function manualPrice(){return manualCart.reduce((sum,c)=>{const s=services[c.i];return sum+Number(s.price_chf)+(c.addon?Number(s.addon_price_chf)||0:0)},0)}
@@ -348,7 +363,7 @@ async function addManualBooking(){
   if(!manualCart.length)return alert('Bitte mindestens eine Behandlung auswählen.');
   if(phone&&!/^\+[1-9]\d{6,14}$/.test(phone))return alert('Bitte Handynummer im Format +41791234567 eingeben (oder leer lassen).');
   if(phone&&isBlockedPhone(phone)&&!confirm('Achtung: Diese Nummer ist für Online-Buchungen gesperrt. Trotzdem einen Termin eintragen?'))return;
-  const dur=manualDuration(),price=manualPrice(),label=manualLabel();
+  const dur=effectiveDur(),price=manualPrice(),label=manualLabel();
   const primaryServiceId=services[manualCart[0].i].id;
   const startAt=new Date(date+'T'+time+':00');
   const endAt=new Date(startAt.getTime()+dur*60000);
@@ -379,7 +394,7 @@ async function addManualBooking(){
     smsJobs.push(sendSms(phone,kundeMsg))
   }
   await Promise.allSettled(smsJobs);
-  manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';manualSearch='';manualResults=[];
+  manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';manualSearch='';manualResults=[];manualDurOv='';
   await Promise.all([loadBookings(),loadCustomers()]);
   alert('Termin wurde erfasst und ist jetzt im Online-Buchungssystem automatisch gesperrt.'+(phone?' SMS-Bestätigung wurde verschickt.':' (Keine Handynummer angegeben, keine SMS an Kundin verschickt.)'));
   tab='bookings';renderApp()
@@ -391,12 +406,12 @@ function startEdit(id){
   editing={id:b.id,customerId:b.customer_id,serviceId:b.service_id,svcName:b.services?.name||'',dur:Math.round((e-s)/60000),price:b.total_price_chf,note:b.customer_note||'',first:b.customers?.first_name||'',last:b.customers?.last_name||'',phone:b.customers?.phone||''};
   manualCart=[];
   manualFirst=editing.first;manualLast=editing.last;manualPhone=editing.phone;
-  manualDate=bookingDateStr(b);
+  manualDate=bookingDateStr(b);manualDurOv=String(editing.dur);
   manualTime=manualPad(s.getHours())+':'+manualPad(s.getMinutes());
   tab='manual';renderApp();window.scrollTo(0,0)
 }
 function cancelEdit(){
-  editing=null;manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';manualSearch='';manualResults=[];
+  editing=null;manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';manualSearch='';manualResults=[];manualDurOv='';
   tab='bookings';renderApp()
 }
 async function saveEditedBooking(){
@@ -407,7 +422,7 @@ async function saveEditedBooking(){
   if(!date||!time)return alert('Bitte Datum und Uhrzeit eingeben.');
   if(phone&&!/^\+[1-9]\d{6,14}$/.test(phone))return alert('Bitte Handynummer im Format +41791234567 eingeben (oder leer lassen).');
   const changedSvc=manualCart.length>0;
-  const dur=changedSvc?manualDuration():editing.dur;
+  const dur=parseInt(manualDurOv)>0?parseInt(manualDurOv):(changedSvc?manualDuration():editing.dur);
   const price=changedSvc?manualPrice():editing.price;
   const serviceId=changedSvc?services[manualCart[0].i].id:editing.serviceId;
   const label=changedSvc?manualLabel():editing.svcName;
@@ -435,7 +450,7 @@ async function saveEditedBooking(){
     await sendSms(phone,`Hallo ${first}, dein Termin bei THE BEAUTY ROOM BY K wurde geändert: neu am ${date} um ${time}. Adresse: ${STUDIO_ADDRESS}`);
     smsSent=true
   }
-  editing=null;manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';manualSearch='';manualResults=[];
+  editing=null;manualCart=[];manualFirst='';manualLast='';manualPhone='';manualDate='';manualTime='';manualSearch='';manualResults=[];manualDurOv='';
   await Promise.all([loadBookings(),loadCustomers()]);
   selectedDate=date;calMonth=new Date(startAt.getFullYear(),startAt.getMonth(),1);
   tab='bookings';renderApp();
@@ -508,7 +523,7 @@ function openCustomerFromBooking(id){
 function closeCustomer(){custOpen=null;renderApp()}
 function bookForCustomer(){
   const p=currentProfile();if(!p)return;
-  editing=null;manualCart=[];manualFirst=p.first;manualLast=p.last;manualPhone=p.phone;manualDate='';manualTime='';manualSearch='';manualResults=[];
+  editing=null;manualCart=[];manualFirst=p.first;manualLast=p.last;manualPhone=p.phone;manualDate='';manualTime='';manualSearch='';manualResults=[];manualDurOv='';
   tab='manual';renderApp();window.scrollTo(0,0)
 }
 async function setCustomerBlocked(block){
@@ -598,7 +613,8 @@ function manualHtml(){
         return row+addonRow
       }).join('')}
     `).join('')}
-    ${manualCart.length?`<div class='note' style='margin:12px 0;font-size:14px'><b>${manualLabel()}</b><br>${manualDuration()} Min. · CHF ${manualPrice()}</div>`:''}
+    ${manualCart.length?`<div class='note' style='margin:12px 0;font-size:14px'><b>${manualLabel()}</b><br>${manualDuration()} Min. (Standard) · CHF ${manualPrice()}</div>`:''}
+    <div class='field'><label>Dauer des Termins</label><select id='m_dur' onchange='setManualDurOv(this.value)'>${durOptionsHtml()}</select><div class='note'>Hier kannst du die Dauer selbst festlegen. Die Zeit nach dem Termin ist sofort wieder frei, im Admin-Kalender und auf der Buchungsseite.</div></div>
     <div class='field'><label>Uhrzeit *</label>
       ${!manualDate?`<div class='note' style='margin-top:0'>Bitte zuerst ein Datum wählen.</div>`:
         (manualTimes(manualDate).length?`<select id='m_time' onchange='setManualTime(this.value)'>
