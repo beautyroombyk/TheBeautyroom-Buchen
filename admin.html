@@ -24,6 +24,7 @@ let svcEdit=null;
 let weekOffset=0;
 let manualDurOv='';
 let manualPriceOv='';
+let blkEdit=null;
 let customers=[],flags={},flagsOk=true,custSearch='',custOpen=null,profilesCache=[];
 let manualSearch='',manualResults=[];
 
@@ -138,6 +139,20 @@ async function addBlocked(){
   const {error}=await supa.from('blocked_times').insert(payload);
   if(error){alert('Fehler beim Speichern: '+error.message);console.error(error);return}
   await loadBlocked();renderApp()
+}
+function startBlkEdit(id){blkEdit=id;renderApp()}
+function cancelBlkEdit(){blkEdit=null;renderApp()}
+async function saveBlocked(id){
+  const g=x=>document.querySelector('#eb_'+x).value;
+  const start=g('start'),end=g('end'),startTime=g('start_time'),endTime=g('end_time'),reason=g('reason').trim();
+  if(!start||!end)return alert('Bitte Start- und Enddatum wählen.');
+  if(end<start)return alert('Enddatum darf nicht vor dem Startdatum liegen.');
+  if((startTime&&!endTime)||(!startTime&&endTime))return alert('Bitte entweder beide Uhrzeiten ausfüllen oder beide leer lassen (= ganzer Tag).');
+  if(startTime&&endTime&&endTime<=startTime)return alert('Die End-Uhrzeit muss nach der Start-Uhrzeit liegen.');
+  const payload={start_date:start,end_date:end,reason:reason||null,start_time:startTime||null,end_time:endTime||null};
+  const {data,error}=await supa.from('blocked_times').update(payload).eq('id',id).select();
+  if(error||!data||!data.length){console.error(error);alert('Fehler: Änderung konnte nicht gespeichert werden. Wurde fix_update_blocked.sql in Supabase ausgeführt?');return}
+  blkEdit=null;await loadBlocked();renderApp()
 }
 async function deleteBlocked(id){
   if(!confirm('Diese Sperre wirklich entfernen?'))return;
@@ -283,10 +298,26 @@ function blockedHtml(){
     <div class='field'><label>Grund (optional)</label><input type='text' id='b_reason' placeholder='z.B. Ferien, Arzttermin'></div>
     <button class='primary' onclick='addBlocked()'>Sperre hinzufügen</button>
     <h2 style='margin-top:22px'>Gesperrte Zeiträume</h2>
-    ${blocked.length?blocked.map(b=>`
+    ${blocked.length?blocked.map(b=>b.id===blkEdit?`
+      <div class='booking'>
+        <h3>Sperre ändern</h3>
+        <div class='field'><label>Von (Datum)</label><input type='date' id='eb_start' value='${esc(b.start_date)}'></div>
+        <div class='field'><label>Bis (Datum)</label><input type='date' id='eb_end' value='${esc(b.end_date)}'></div>
+        <div class='row2'>
+          <div class='field'><label>Ab Uhrzeit (optional)</label><input type='time' id='eb_start_time' value='${esc(b.start_time?b.start_time.slice(0,5):'')}'></div>
+          <div class='field'><label>Bis Uhrzeit (optional)</label><input type='time' id='eb_end_time' value='${esc(b.end_time?b.end_time.slice(0,5):'')}'></div>
+        </div>
+        <div class='note' style='margin:-4px 0 12px'>Uhrzeiten leer lassen = ganzer Tag gesperrt.</div>
+        <div class='field'><label>Grund (optional)</label><input type='text' id='eb_reason' value='${esc(b.reason||'')}'></div>
+        <button class='primary' onclick='saveBlocked("${b.id}")'>Änderungen speichern</button>
+        <div class='clear-filter'><a href='#' onclick='cancelBlkEdit();return false'>Abbrechen</a></div>
+      </div>`:`
       <div class='blocked-item'>
         <div><b>${b.start_date}</b> – <b>${b.end_date}</b>${b.start_time?`<small>${b.start_time.slice(0,5)} – ${b.end_time.slice(0,5)} Uhr</small>`:`<small>Ganzer Tag</small>`}${b.reason?`<small>${esc(b.reason)}</small>`:''}</div>
-        <button class='del-btn' onclick='deleteBlocked("${b.id}")'>Entfernen</button>
+        <div style='display:flex;flex-direction:column;gap:6px;align-items:end'>
+          <button class='del-btn' style='color:var(--accent)' onclick='startBlkEdit("${b.id}")'>Ändern</button>
+          <button class='del-btn' onclick='deleteBlocked("${b.id}")'>Entfernen</button>
+        </div>
       </div>
     `).join(''):`<div class='empty'>Keine gesperrten Zeiträume.</div>`}
   `
